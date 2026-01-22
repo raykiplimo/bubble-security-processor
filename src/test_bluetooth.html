@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bubble Bluetooth Plugin Tester</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .log { background: #f0f0f0; padding: 10px; border: 1px solid #ccc; height: 200px; overflow-y: scroll; }
+        button { padding: 10px; margin: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Bluetooth Plugin Test Harness</h1>
+    <p>Use this page to verify your browser and device support Web Bluetooth.</p>
+    
+    <div>
+        <label>Service UUID (Optional): <input type="text" id="serviceUuid" placeholder="e.g. battery_service"></label>
+    </div>
+    <br>
+    
+    <button onclick="connect()">Connect</button>
+    <button onclick="disconnect()">Disconnect</button>
+    
+    <h3>Log</h3>
+    <div id="log" class="log"></div>
+
+    <script>
+        // Mocking the Bubble Instance Data structure
+        var instance = {
+            data: {
+                device: null,
+                server: null,
+                log: function(msg) {
+                    var logDiv = document.getElementById('log');
+                    logDiv.innerHTML += "<div>" + new Date().toLocaleTimeString() + " - " + msg + "</div>";
+                    logDiv.scrollTop = logDiv.scrollHeight;
+                }
+            },
+            publishState: function(name, value) {
+                this.data.log("<b>STATE UPDATE:</b> " + name + " = " + value);
+            },
+            triggerEvent: function(name, data) {
+                this.data.log("<b>EVENT TRIGGERED:</b> " + name + " " + JSON.stringify(data || {}));
+            }
+        };
+
+        function connect() {
+            var serviceUuid = document.getElementById('serviceUuid').value;
+            
+            var properties = {
+                service_uuid: serviceUuid,
+                optional_services: serviceUuid // add same service to optional to ensure access
+            };
+            
+            // Re-using logic from bubble_bluetooth.js
+            if (!navigator.bluetooth) {
+                instance.data.log("Web Bluetooth API not available.");
+                return;
+            }
+
+            let options = { acceptAllDevices: true };
+            if (serviceUuid) {
+                 // Note: If you filter by service, you don't need acceptAllDevices usually, 
+                 // but for testing generic devices 'acceptAllDevices' + 'optionalServices' is often useful
+                 // However, the API spec says you can't have both acceptAllDevices and filters.
+                 
+                 // Simulating the plugin logic strictly:
+                 options = {
+                     filters: [{ services: [serviceUuid] }]
+                 };
+            } else {
+                // If no service specified, scan for all (requires optionalServices for any access)
+                options = { acceptAllDevices: true };
+                // Commonly commonly used services for playing around
+                options.optionalServices = ['battery_service', 'device_information']; 
+            }
+
+            instance.data.log("Requesting device with options: " + JSON.stringify(options));
+
+            navigator.bluetooth.requestDevice(options)
+            .then(device => {
+                instance.data.device = device;
+                instance.data.log("Device selected: " + device.name);
+                instance.publishState("device_name", device.name);
+                instance.publishState("is_connected", true); 
+                
+                device.addEventListener('gattserverdisconnected', function() {
+                     instance.data.log("Device disconnected");
+                     instance.publishState("is_connected", false);
+                     instance.triggerEvent("disconnected");
+                });
+
+                return device.gatt.connect();
+            })
+            .then(server => {
+                instance.data.server = server;
+                instance.data.log("Connected to GATT Server");
+                instance.triggerEvent("connected");
+            })
+            .catch(error => {
+                instance.data.log("Error: " + error);
+                instance.triggerEvent("error", { error: error.toString() });
+            });
+        }
+
+        function disconnect() {
+            if (instance.data.device && instance.data.device.gatt.connected) {
+                instance.data.device.gatt.disconnect();
+                instance.data.log("User initiated disconnect");
+            } else {
+                instance.data.log("No device connected");
+            }
+        }
+    </script>
+</body>
+</html>
